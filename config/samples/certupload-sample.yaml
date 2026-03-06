@@ -1,0 +1,40 @@
+# WARNING: This is a sample configuration file.
+# Replace placeholder values with your actual Aliyun credentials and domain information.
+# Never commit sensitive data like access keys to version control.
+# For production, consider using secure secret management solutions:
+# - External Secrets Operator
+# - HashiCorp Vault
+# - Kubernetes Secrets with encryption at rest
+---
+apiVersion: aliyun.weyundong.com/v1alpha1
+kind: CertUpload
+metadata:
+  name: certupload-sample
+  namespace: default
+spec:
+  # Reference to Secret containing Aliyun Access Key ID
+  accessKeyIdRef:
+    name: aliyun-credentials
+    namespace: default
+    key: accessKeyId
+
+  # Reference to Secret containing Aliyun Access Key Secret
+  accessKeySecretRef:
+    name: aliyun-credentials
+    namespace: default
+    key: accessKeySecret
+  
+  # Aliyun region
+  region: "cn-hangzhou"
+  
+  # OSS bucket name
+  bucket: "your-oss-bucket"
+  
+  # Domain name for the certificate
+  domain: "example.com"
+  
+  # Reference to cert-manager Certificate
+  certManagerCertRef:
+    name: example-com-tls
+    namespace: default
+    # If namespace is omitted, defaults to the same namespace as CertUpload

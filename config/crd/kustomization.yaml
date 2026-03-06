@@ -1,0 +1,6 @@
+# This kustomization.yaml is not intended to be run by itself,
+# since it doesn't depend on CRDs. Instead, it's intended to be
+# used as a base for other kustomizations.
+
+resources:
+- bases/aliyun.weyundong.com_certuploads.yaml
