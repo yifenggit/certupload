@@ -77,7 +77,8 @@ spec:
                     minLength: 1
                     type: string
                   namespace:
-                    description: Namespace of the Secret. If empty, defaults to the namespace of the CertUpload resource.
+                    description: Namespace of the Secret. If empty, defaults to the
+                      namespace of the CertUpload resource.
                     type: string
                 required:
                 - key
@@ -97,35 +98,41 @@ spec:
                     minLength: 1
                     type: string
                   namespace:
-                    description: Namespace of the Secret. If empty, defaults to the namespace of the CertUpload resource.
+                    description: Namespace of the Secret. If empty, defaults to the
+                      namespace of the CertUpload resource.
                     type: string
                 required:
                 - key
                 - name
                 type: object
               bucket:
-                description: Bucket is the name of the OSS bucket where the domain certificate should be updated.
+                description: Bucket is the name of the OSS bucket where the domain
+                  certificate should be updated.
                 minLength: 1
                 type: string
               certManagerCertRef:
-                description: CertManagerCertRef is a reference to the cert-manager Certificate resource.
+                description: CertManagerCertRef is a reference to the cert-manager
+                  Certificate resource.
                 properties:
                   name:
                     description: Name of the Certificate resource.
                     minLength: 1
                     type: string
                   namespace:
-                    description: Namespace of the Certificate resource. If empty, defaults to the namespace of the CertUpload resource.
+                    description: Namespace of the Certificate resource. If empty,
+                      defaults to the namespace of the CertUpload resource.
                     type: string
                 required:
                 - name
                 type: object
               domain:
-                description: Domain is the domain name for which the certificate should be uploaded.
+                description: Domain is the domain name for which the certificate should
+                  be uploaded.
                 minLength: 1
                 type: string
               region:
-                description: Region is the Aliyun region where the SSL certificate service and OSS bucket are located.
+                description: Region is the Aliyun region where the SSL certificate
+                  service and OSS bucket are located.
                 minLength: 1
                 type: string
             required:
@@ -140,12 +147,15 @@ spec:
             description: CertUploadStatus defines the observed state of CertUpload
             properties:
               certificateFingerprint:
-                description: CertificateFingerprint is the fingerprint (e.g., SHA256) of the last uploaded certificate.
+                description: CertificateFingerprint is the fingerprint (e.g., SHA256)
+                  of the last uploaded certificate.
                 type: string
               conditions:
-                description: Conditions represent the latest available observations of the CertUpload's state.
+                description: Conditions represent the latest available observations
+                  of the CertUpload's state.
                 items:
-                  description: Condition contains details for one aspect of the current state of this API Resource.
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
                   properties:
                     lastTransitionTime:
                       description: |-
@@ -199,14 +209,17 @@ spec:
                   type: object
                 type: array
               errorMessage:
-                description: ErrorMessage contains a human-readable error message if the last sync failed.
+                description: ErrorMessage contains a human-readable error message
+                  if the last sync failed.
                 type: string
               lastSyncTime:
-                description: LastSyncTime is the timestamp when the certificate was last successfully synchronized to Aliyun.
+                description: LastSyncTime is the timestamp when the certificate was
+                  last successfully synchronized to Aliyun.
                 format: date-time
                 type: string
               observedGeneration:
-                description: ObservedGeneration is the most recent generation observed by the controller.
+                description: ObservedGeneration is the most recent generation observed
+                  by the controller.
                 format: int64
                 type: integer
             type: object
