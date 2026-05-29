@@ -29,16 +29,19 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
       name: Ready
       type: string
+    - jsonPath: .status.ossStatus
+      name: OSS Status
+      type: string
+    - jsonPath: .status.cdnStatus
+      name: CDN Status
+      type: string
     - jsonPath: .status.lastSyncTime
       name: Last Sync
       type: date
-    - jsonPath: .spec.domain
-      name: Domain
-      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
-    name: v1alpha1
+    name: v1
     schema:
       openAPIV3Schema:
         description: CertUpload is the Schema for the certuploads API
@@ -105,11 +108,19 @@ spec:
                 - key
                 - name
                 type: object
-              bucket:
-                description: Bucket is the name of the OSS bucket where the domain
-                  certificate should be updated.
-                minLength: 1
-                type: string
+              cdn:
+                description: |-
+                  CDN is the optional CDN domain SSL certificate configuration.
+                  If set, the controller will update the CDN domain SSL certificate.
+                properties:
+                  domain:
+                    description: Domain is the CDN accelerated domain name for which
+                      the SSL certificate should be configured.
+                    minLength: 1
+                    type: string
+                required:
+                - domain
+                type: object
               certManagerCertRef:
                 description: CertManagerCertRef is a reference to the cert-manager
                   Certificate resource.
@@ -125,27 +136,62 @@ spec:
                 required:
                 - name
                 type: object
-              domain:
-                description: Domain is the domain name for which the certificate should
-                  be uploaded.
-                minLength: 1
-                type: string
+              oss:
+                description: |-
+                  OSS is the optional OSS domain certificate configuration.
+                  If set, the controller will update the OSS bucket domain certificate.
+                properties:
+                  bucket:
+                    description: Bucket is the name of the OSS bucket where the domain
+                      certificate should be updated.
+                    minLength: 1
+                    type: string
+                  domain:
+                    description: Domain is the domain name for the OSS bucket certificate
+                      binding.
+                    minLength: 1
+                    type: string
+                required:
+                - bucket
+                - domain
+                type: object
               region:
                 description: Region is the Aliyun region where the SSL certificate
-                  service and OSS bucket are located.
+                  service (CAS) is located.
                 minLength: 1
                 type: string
+              uploadOnly:
+                description: |-
+                  UploadOnly when set to true, uploads the certificate to Aliyun CAS only,
+                  without binding to OSS or CDN. Use this when you want to manually manage
+                  certificate bindings later.
+                type: boolean
             required:
             - accessKeyIdRef
             - accessKeySecretRef
-            - bucket
             - certManagerCertRef
-            - domain
             - region
             type: object
           status:
             description: CertUploadStatus defines the observed state of CertUpload
             properties:
+              casCertificateId:
+                description: CASCertificateID is the ID of the certificate stored
+                  in Aliyun CAS.
+                type: string
+              cdnErrorMessage:
+                description: CDNErrorMessage contains the error message if the last
+                  CDN sync failed.
+                type: string
+              cdnLastSyncTime:
+                description: CDNLastSyncTime is the timestamp when the CDN domain
+                  SSL certificate was last updated.
+                format: date-time
+                type: string
+              cdnStatus:
+                description: 'CDNStatus indicates the last CDN sync result: Succeeded,
+                  Failed, or Skipped.'
+                type: string
               certificateFingerprint:
                 description: CertificateFingerprint is the fingerprint (e.g., SHA256)
                   of the last uploaded certificate.
@@ -222,6 +268,19 @@ spec:
                   by the controller.
                 format: int64
                 type: integer
+              ossErrorMessage:
+                description: OSSErrorMessage contains the error message if the last
+                  OSS sync failed.
+                type: string
+              ossLastSyncTime:
+                description: OSSLastSyncTime is the timestamp when the OSS domain
+                  certificate was last updated.
+                format: date-time
+                type: string
+              ossStatus:
+                description: 'OSSStatus indicates the last OSS sync result: Succeeded,
+                  Failed, or Skipped.'
+                type: string
             type: object
         type: object
     served: true
@@ -278,6 +337,77 @@ rules:
   verbs:
   - create
   - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: certupload
+  name: certupload-certupload-admin-role
+rules:
+- apiGroups:
+  - aliyun.weyundong.com
+  resources:
+  - certuploads
+  verbs:
+  - '*'
+- apiGroups:
+  - aliyun.weyundong.com
+  resources:
+  - certuploads/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: certupload
+  name: certupload-certupload-editor-role
+rules:
+- apiGroups:
+  - aliyun.weyundong.com
+  resources:
+  - certuploads
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - aliyun.weyundong.com
+  resources:
+  - certuploads/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: certupload
+  name: certupload-certupload-viewer-role
+rules:
+- apiGroups:
+  - aliyun.weyundong.com
+  resources:
+  - certuploads
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - aliyun.weyundong.com
+  resources:
+  - certuploads/status
+  verbs:
+  - get
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -457,7 +587,7 @@ spec:
         - --health-probe-bind-address=:8081
         command:
         - /manager
-        image: registry.cn-chengdu.aliyuncs.com/buf/certupload:1.0.0
+        image: registry.cn-chengdu.aliyuncs.com/buf/certupload:1.1.0
         livenessProbe:
           httpGet:
             path: /healthz
