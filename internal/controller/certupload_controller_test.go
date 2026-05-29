@@ -34,7 +34,7 @@ import (
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	cmmeta "github.com/cert-manager/cert-manager/pkg/apis/meta/v1"
-	aliyunv1alpha1 "wyundong.com/certupload/api/v1alpha1"
+	certuploadv1 "wyundong.com/certupload/api/v1"
 )
 
 func TestCertUploadController(t *testing.T) {
@@ -54,7 +54,7 @@ var _ = Describe("CertUpload Controller", func() {
 		scheme := newScheme()
 		fakeClient = fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithStatusSubresource(&aliyunv1alpha1.CertUpload{}).
+			WithStatusSubresource(&certuploadv1.CertUpload{}).
 			Build()
 
 		reconciler = &CertUploadReconciler{
@@ -116,24 +116,26 @@ var _ = Describe("CertUpload Controller", func() {
 			err = fakeClient.Create(ctx, certSecret)
 			Expect(err).NotTo(HaveOccurred())
 
-			certUpload := &aliyunv1alpha1.CertUpload{
+			certUpload := &certuploadv1.CertUpload{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test",
 					Namespace: "default",
 				},
-				Spec: aliyunv1alpha1.CertUploadSpec{
-					AccessKeyIDRef: aliyunv1alpha1.SecretKeySelector{
+				Spec: certuploadv1.CertUploadSpec{
+					AccessKeyIDRef: certuploadv1.SecretKeySelector{
 						Name: "secret",
 						Key:  "accessKeyId",
 					},
-					AccessKeySecretRef: aliyunv1alpha1.SecretKeySelector{
+					AccessKeySecretRef: certuploadv1.SecretKeySelector{
 						Name: "secret",
 						Key:  "accessKeySecret",
 					},
 					Region: "cn-hangzhou",
-					Bucket: "test-bucket",
-					Domain: "example.com",
-					CertManagerCertRef: aliyunv1alpha1.CertManagerCertRef{
+					OSS: &certuploadv1.OSSConfig{
+						Bucket: "test-bucket",
+						Domain: "example.com",
+					},
+					CertManagerCertRef: certuploadv1.CertManagerCertRef{
 						Name: "test-cert",
 					},
 				},
@@ -153,7 +155,7 @@ var _ = Describe("CertUpload Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			// Fetch updated CertUpload
-			updated := &aliyunv1alpha1.CertUpload{}
+			updated := &certuploadv1.CertUpload{}
 			err = fakeClient.Get(ctx, types.NamespacedName{Name: "test", Namespace: "default"}, updated)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(updated.Finalizers).To(ContainElement(finalizerName))
@@ -180,24 +182,26 @@ var _ = Describe("CertUpload Controller", func() {
 			err := fakeClient.Create(ctx, cert)
 			Expect(err).NotTo(HaveOccurred())
 
-			certUpload := &aliyunv1alpha1.CertUpload{
+			certUpload := &certuploadv1.CertUpload{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test",
 					Namespace: "default",
 				},
-				Spec: aliyunv1alpha1.CertUploadSpec{
-					AccessKeyIDRef: aliyunv1alpha1.SecretKeySelector{
+				Spec: certuploadv1.CertUploadSpec{
+					AccessKeyIDRef: certuploadv1.SecretKeySelector{
 						Name: "secret",
 						Key:  "accessKeyId",
 					},
-					AccessKeySecretRef: aliyunv1alpha1.SecretKeySelector{
+					AccessKeySecretRef: certuploadv1.SecretKeySelector{
 						Name: "secret",
 						Key:  "accessKeySecret",
 					},
 					Region: "cn-hangzhou",
-					Bucket: "test-bucket",
-					Domain: "example.com",
-					CertManagerCertRef: aliyunv1alpha1.CertManagerCertRef{
+					OSS: &certuploadv1.OSSConfig{
+						Bucket: "test-bucket",
+						Domain: "example.com",
+					},
+					CertManagerCertRef: certuploadv1.CertManagerCertRef{
 						Name: "test-cert",
 					},
 				},
@@ -217,12 +221,294 @@ var _ = Describe("CertUpload Controller", func() {
 			Expect(result.RequeueAfter).To(BeNumerically("~", 5*time.Minute, float64(time.Second)))
 		})
 	})
+
+	Context("When CDN is configured", func() {
+		It("Should set CDN domain certificate", func() {
+			cert := &certmanagerv1.Certificate{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-cert",
+					Namespace: "default",
+				},
+				Spec: certmanagerv1.CertificateSpec{
+					SecretName: "test-secret",
+				},
+				Status: certmanagerv1.CertificateStatus{
+					Conditions: []certmanagerv1.CertificateCondition{
+						{
+							Type:   certmanagerv1.CertificateConditionReady,
+							Status: cmmeta.ConditionTrue,
+						},
+					},
+				},
+			}
+			err := fakeClient.Create(ctx, cert)
+			Expect(err).NotTo(HaveOccurred())
+
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "secret",
+					Namespace: "default",
+				},
+				Data: map[string][]byte{
+					"accessKeyId":     []byte("test-access-key-id"),
+					"accessKeySecret": []byte("test-access-key-secret"),
+				},
+			}
+			err = fakeClient.Create(ctx, secret)
+			Expect(err).NotTo(HaveOccurred())
+
+			certSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-secret",
+					Namespace: "default",
+				},
+				Data: map[string][]byte{
+					"tls.crt": []byte("-----BEGIN CERTIFICATE-----\ntest-cert\n-----END CERTIFICATE-----\n"),
+					"tls.key": []byte("-----BEGIN PRIVATE KEY-----\ntest-key\n-----END PRIVATE KEY-----\n"),
+				},
+			}
+			err = fakeClient.Create(ctx, certSecret)
+			Expect(err).NotTo(HaveOccurred())
+
+			certUpload := &certuploadv1.CertUpload{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-cdn",
+					Namespace: "default",
+				},
+				Spec: certuploadv1.CertUploadSpec{
+					AccessKeyIDRef: certuploadv1.SecretKeySelector{
+						Name: "secret",
+						Key:  "accessKeyId",
+					},
+					AccessKeySecretRef: certuploadv1.SecretKeySelector{
+						Name: "secret",
+						Key:  "accessKeySecret",
+					},
+					Region: "cn-hangzhou",
+					CDN: &certuploadv1.CDNConfig{
+						Domain: "cdn.example.com",
+					},
+					CertManagerCertRef: certuploadv1.CertManagerCertRef{
+						Name: "test-cert",
+					},
+				},
+			}
+
+			err = fakeClient.Create(ctx, certUpload)
+			Expect(err).NotTo(HaveOccurred())
+
+			req := reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      "test-cdn",
+					Namespace: "default",
+				},
+			}
+
+			_, err = reconciler.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := &certuploadv1.CertUpload{}
+			err = fakeClient.Get(ctx, types.NamespacedName{Name: "test-cdn", Namespace: "default"}, updated)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updated.Status.CDNStatus).To(Equal("Succeeded"))
+			Expect(updated.Status.CDNLastSyncTime).NotTo(BeNil())
+			Expect(updated.Status.CASCertificateID).To(Equal("mock-cert-id-cdn.example.com"))
+		})
+
+		It("Should skip CDN when not configured", func() {
+			cert := &certmanagerv1.Certificate{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-cert",
+					Namespace: "default",
+				},
+				Spec: certmanagerv1.CertificateSpec{
+					SecretName: "test-secret",
+				},
+				Status: certmanagerv1.CertificateStatus{
+					Conditions: []certmanagerv1.CertificateCondition{
+						{
+							Type:   certmanagerv1.CertificateConditionReady,
+							Status: cmmeta.ConditionTrue,
+						},
+					},
+				},
+			}
+			err := fakeClient.Create(ctx, cert)
+			Expect(err).NotTo(HaveOccurred())
+
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "secret",
+					Namespace: "default",
+				},
+				Data: map[string][]byte{
+					"accessKeyId":     []byte("test-access-key-id"),
+					"accessKeySecret": []byte("test-access-key-secret"),
+				},
+			}
+			err = fakeClient.Create(ctx, secret)
+			Expect(err).NotTo(HaveOccurred())
+
+			certSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-secret",
+					Namespace: "default",
+				},
+				Data: map[string][]byte{
+					"tls.crt": []byte("-----BEGIN CERTIFICATE-----\ntest-cert\n-----END CERTIFICATE-----\n"),
+					"tls.key": []byte("-----BEGIN PRIVATE KEY-----\ntest-key\n-----END PRIVATE KEY-----\n"),
+				},
+			}
+			err = fakeClient.Create(ctx, certSecret)
+			Expect(err).NotTo(HaveOccurred())
+
+			// CR with only OSS configured, CDN should be Skipped
+			certUpload := &certuploadv1.CertUpload{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-oss-only",
+					Namespace: "default",
+				},
+				Spec: certuploadv1.CertUploadSpec{
+					AccessKeyIDRef: certuploadv1.SecretKeySelector{
+						Name: "secret",
+						Key:  "accessKeyId",
+					},
+					AccessKeySecretRef: certuploadv1.SecretKeySelector{
+						Name: "secret",
+						Key:  "accessKeySecret",
+					},
+					Region: "cn-hangzhou",
+					OSS: &certuploadv1.OSSConfig{
+						Bucket: "test-bucket",
+						Domain: "example.com",
+					},
+					CertManagerCertRef: certuploadv1.CertManagerCertRef{
+						Name: "test-cert",
+					},
+				},
+			}
+
+			err = fakeClient.Create(ctx, certUpload)
+			Expect(err).NotTo(HaveOccurred())
+
+			req := reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      "test-oss-only",
+					Namespace: "default",
+				},
+			}
+
+			_, err = reconciler.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := &certuploadv1.CertUpload{}
+			err = fakeClient.Get(ctx, types.NamespacedName{Name: "test-oss-only", Namespace: "default"}, updated)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updated.Status.CDNStatus).To(Equal("Skipped"))
+			Expect(updated.Status.OSSStatus).To(Equal("Succeeded"))
+		})
+	})
+
+	Context("When neither OSS nor CDN is configured", func() {
+		It("Should upload to CAS only", func() {
+			cert := &certmanagerv1.Certificate{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-cert",
+					Namespace: "default",
+				},
+				Spec: certmanagerv1.CertificateSpec{
+					SecretName: "test-secret",
+					DNSNames:   []string{"cas-only.example.com"},
+				},
+				Status: certmanagerv1.CertificateStatus{
+					Conditions: []certmanagerv1.CertificateCondition{
+						{
+							Type:   certmanagerv1.CertificateConditionReady,
+							Status: cmmeta.ConditionTrue,
+						},
+					},
+				},
+			}
+			err := fakeClient.Create(ctx, cert)
+			Expect(err).NotTo(HaveOccurred())
+
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "secret",
+					Namespace: "default",
+				},
+				Data: map[string][]byte{
+					"accessKeyId":     []byte("test-access-key-id"),
+					"accessKeySecret": []byte("test-access-key-secret"),
+				},
+			}
+			err = fakeClient.Create(ctx, secret)
+			Expect(err).NotTo(HaveOccurred())
+
+			certSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-secret",
+					Namespace: "default",
+				},
+				Data: map[string][]byte{
+					"tls.crt": []byte("-----BEGIN CERTIFICATE-----\ntest-cert\n-----END CERTIFICATE-----\n"),
+					"tls.key": []byte("-----BEGIN PRIVATE KEY-----\ntest-key\n-----END PRIVATE KEY-----\n"),
+				},
+			}
+			err = fakeClient.Create(ctx, certSecret)
+			Expect(err).NotTo(HaveOccurred())
+
+			// CR with UploadOnly set to true — no OSS or CDN binding
+			certUpload := &certuploadv1.CertUpload{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-cas-only",
+					Namespace: "default",
+				},
+				Spec: certuploadv1.CertUploadSpec{
+					AccessKeyIDRef: certuploadv1.SecretKeySelector{
+						Name: "secret",
+						Key:  "accessKeyId",
+					},
+					AccessKeySecretRef: certuploadv1.SecretKeySelector{
+						Name: "secret",
+						Key:  "accessKeySecret",
+					},
+					Region:     "cn-hangzhou",
+					UploadOnly: true,
+					CertManagerCertRef: certuploadv1.CertManagerCertRef{
+						Name: "test-cert",
+					},
+				},
+			}
+
+			err = fakeClient.Create(ctx, certUpload)
+			Expect(err).NotTo(HaveOccurred())
+
+			req := reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      "test-cas-only",
+					Namespace: "default",
+				},
+			}
+
+			_, err = reconciler.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+
+			updated := &certuploadv1.CertUpload{}
+			err = fakeClient.Get(ctx, types.NamespacedName{Name: "test-cas-only", Namespace: "default"}, updated)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(updated.Status.OSSStatus).To(Equal("Skipped"))
+			Expect(updated.Status.CDNStatus).To(Equal("Skipped"))
+			Expect(updated.Status.CASCertificateID).NotTo(BeEmpty())
+			Expect(updated.Status.LastSyncTime).NotTo(BeNil())
+		})
+	})
 })
 
 // Helper function to create scheme with all necessary types
 func newScheme() *runtime.Scheme {
 	scheme := runtime.NewScheme()
-	_ = aliyunv1alpha1.AddToScheme(scheme)
+	_ = certuploadv1.AddToScheme(scheme)
 	_ = certmanagerv1.AddToScheme(scheme)
 	_ = corev1.AddToScheme(scheme)
 	return scheme

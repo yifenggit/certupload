@@ -7,34 +7,35 @@
 <p align="center">
   <a href="#简介">简介</a> •
   <a href="#快速开始">快速开始</a> •
-  <a href="#本地测试">本地测试</a> •
-  <a href="#部署指南">部署指南</a> •
-  <a href="#开发指南">开发指南</a>
+  <a href="#开发指南">开发指南</a> •
+  <a href="#发布部署">发布部署</a> •
+  <a href="#故障排查">故障排查</a>
 </p>
 
 ---
 
 ## 简介
 
-`certupload` 是一个基于 Kubebuilder 框架构建的 Kubernetes Operator，用于自动化管理 TLS 证书的生命周期。它能够将 cert-manager 生成的证书自动同步到阿里云 SSL 证书服务（CAS），并配置 OSS 存储桶域名证书，实现证书的自动续期和部署。
+`certupload` 是一个基于 Kubebuilder 框架构建的 Kubernetes Operator，用于自动化管理 TLS 证书的生命周期。它能够将 cert-manager 生成的证书自动同步到阿里云 SSL 证书服务（CAS），并灵活配置到 OSS 存储桶域名或 CDN 加速域名，实现证书的自动续期和部署。
 
 ### 核心功能
 
-- 🔄 **自动同步** - 监听 cert-manager 颁发的证书，自动上传至阿里云 SSL 证书服务
-- 🚀 **自动部署** - 自动关联证书到指定的 OSS 存储桶域名，完成 HTTPS 配置
+- 🔄 **自动同步** - 监听 cert-manager 颁发的证书，自动上传至阿里云 SSL 证书服务（CAS）
+- 🚀 **灵活部署** - 按需配置同步目标：配置了 OSS 才更新 OSS，配置了 CDN 才更新 CDN，互不干扰
+- ☁️ **CDN 支持** - 自动将 CAS 证书绑定到阿里云 CDN 加速域名，一站式 HTTPS 配置
 - ♻️ **证书续期** - 支持 cert-manager 证书自动续期，无缝更新云端证书
-- 📊 **状态监控** - 提供完整的 CR 状态和事件记录，便于监控和排错
+- 📊 **状态监控** - OSS/CDN 独立同步状态，便于定位问题
 - 🔗 **跨命名空间** - 支持引用不同命名空间中的 Secret 资源
 
 ### 工作原理
 
 ```
-┌──────────────┐      ┌──────────────┐      ┌─────────────────┐
-│  cert-manager │─────▶│  CertUpload  │─────▶│ Alibaba Cloud   │
-│   (颁发证书)   │      │   Operator   │      │  SSL Services   │
-└──────────────┘      └──────────────┘      │  + OSS CDN      │
-                             │               └─────────────────┘
-                             │
+┌──────────────┐      ┌──────────────┐      ┌─────────────────────┐
+│  cert-manager │─────▶│  CertUpload  │─────▶│ Alibaba Cloud       │
+│   (颁发证书)   │      │   Operator   │      │  ├─ CAS (证书存储)   │
+└──────────────┘      └──────────────┘      │  ├─ OSS (Bucket域名) │
+                             │               │  └─ CDN (加速域名)   │
+                             │               └─────────────────────┘
                              ▼
                       ┌──────────────┐
                       │  Status &    │
@@ -42,7 +43,79 @@
                       └──────────────┘
 ```
 
+### CRD 配置说明
+
+CertUpload 支持四种灵活的配置模式，按需选择更新目标：
+
+#### 模式一：仅 OSS
+
+```yaml
+spec:
+  region: "cn-hangzhou"
+  # 配置了 OSS，才会更新 OSS Bucket 域名证书
+  oss:
+    bucket: "my-bucket"
+    domain: "oss.example.com"
+  certManagerCertRef:
+    name: example-com-tls
+```
+
+#### 模式二：仅 CDN
+
+```yaml
+spec:
+  region: "cn-hangzhou"
+  # 配置了 CDN，才会更新 CDN 加速域名证书
+  cdn:
+    domain: "cdn.example.com"
+  certManagerCertRef:
+    name: example-com-tls
+```
+
+#### 模式三：OSS + CDN 同时
+
+```yaml
+spec:
+  region: "cn-hangzhou"
+  # 同时配置 OSS 和 CDN，两个目标都会更新
+  oss:
+    bucket: "my-bucket"
+    domain: "oss.example.com"
+  cdn:
+    domain: "cdn.example.com"
+  certManagerCertRef:
+    name: example-com-tls
+```
+
+#### 模式四：仅上传 CAS（uploadOnly）
+
+```yaml
+spec:
+  region: "cn-hangzhou"
+  # 显式声明只上传到 CAS，不绑定 OSS 或 CDN
+  uploadOnly: true
+  # CAS 证书名自动取自 cert-manager Certificate 的 DNS 名称
+  certManagerCertRef:
+    name: example-com-tls
+```
+
+#### Status 字段说明
+
+| 字段 | 说明 |
+|------|------|
+| `status.casCertificateId` | CAS 中存储的证书 ID |
+| `status.ossStatus` | OSS 同步结果：`Succeeded` / `Failed` / `Skipped` |
+| `status.ossLastSyncTime` | OSS 最后同步时间 |
+| `status.ossErrorMessage` | OSS 同步错误信息 |
+| `status.cdnStatus` | CDN 同步结果：`Succeeded` / `Failed` / `Skipped` |
+| `status.cdnLastSyncTime` | CDN 最后同步时间 |
+| `status.cdnErrorMessage` | CDN 同步错误信息 |
+
+> **使用原则**：配了才干活，不配不动手。`oss`、`cdn`、`uploadOnly` 按需选择，各自独立。
+
 ## 快速开始
+
+用 [Kind](https://kind.sigs.k8s.io/) 在本地快速体验。
 
 ### 前置要求
 
@@ -50,249 +123,71 @@
 |------|---------|
 | Go | v1.24.6+ |
 | Docker | 17.03+ |
+| Kind | 最新版 |
 | kubectl | v1.11.3+ |
-| Kubernetes | v1.11.3+ |
 
-### 安装部署
-
-#### 1. 构建并推送镜像
+### 1. 创建 Kind 集群
 
 ```bash
-# 设置镜像地址
-export IMG=<your-registry>/certupload:<tag>
-
-# 构建并推送镜像
-make docker-build docker-push IMG=$IMG
-```
-
-> **注意：** 确保目标集群能够访问镜像仓库。如遇权限问题，请检查仓库访问权限或使用镜像拉取密钥。
-
-#### 2. 安装 CRD
-
-```bash
-make install
-```
-
-#### 3. 部署控制器
-
-```bash
-make deploy IMG=$IMG
-```
-
-> **提示：** 如遇 RBAC 权限错误，请确保拥有 `cluster-admin` 权限或联系集群管理员。
-
-#### 4. 创建示例资源
-
-```bash
-# 应用示例配置
-kubectl apply -k config/samples/
-
-# 查看资源状态
-kubectl get certupload -A
-```
-
-### 卸载
-
-```bash
-# 1. 删除 CR 实例
-kubectl delete -k config/samples/
-
-# 2. 删除 CRD
-make uninstall
-
-# 3. 卸载控制器
-make undeploy
-```
-
-## 本地测试
-
-本项目推荐使用 [Kind](https://kind.sigs.k8s.io/) 进行本地开发和测试。
-
-### 使用 Makefile 快速测试
-
-```bash
-# 一键测试：创建集群、构建、部署
-make kind-test IMG=certupload:test
-
-# 或者分步执行：
-export IMG=certupload:test
-make kind-create          # 创建 Kind 集群
-make kind-load            # 构建并加载镜像
-make kind-deploy          # 部署控制器
-```
-
-### 手动测试步骤
-
-#### 1. 准备 Kind 集群
-
-```bash
-# 创建集群
 kind create cluster --name certupload-test
+```
 
-# 构建镜像
-docker build --build-arg TARGETOS=linux --build-arg TARGETARCH=amd64 -t certupload:test .
+### 2. 构建镜像并加载
 
-# 加载镜像到集群
+```bash
+export IMG=certupload:test
+make docker-build IMG=$IMG
 kind load docker-image certupload:test --name certupload-test
 ```
 
-#### 2. 部署控制器
+### 3. 部署控制器
 
 ```bash
-# 配置镜像地址
 cd config/manager && kustomize edit set image controller=certupload:test && cd ../..
-
-# 部署到集群
-kustomize build config/default | kubectl apply --context kind-certupload-test -f -
-
-# 验证部署状态
-kubectl --context kind-certupload-test get pods -n certupload-system
-```
-
-#### 3. 安装 cert-manager（必需）
-
-```bash
-# 安装 cert-manager
-kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.0/cert-manager.yaml
+kustomize build config/default | kubectl apply -f -
 
 # 等待就绪
-kubectl wait --for=condition=ready pod -l app=cert-manager -n cert-manager --timeout=120s
+kubectl wait --for=condition=ready pod -l control-plane=controller-manager \
+  -n certupload --timeout=120s
 ```
 
-#### 4. 创建测试资源
+### 4. 安装 cert-manager（必需）
 
 ```bash
-# 创建阿里云凭证 Secret
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.14.0/cert-manager.yaml
+kubectl wait --for=condition=ready pod -l app=cert-manager \
+  -n cert-manager --timeout=120s
+```
+
+### 5. 创建测试资源
+
+```bash
+# 创建阿里云凭证 Secret（替换为真实凭证）
 kubectl apply -f config/samples/secret-sample.yaml
 
 # 创建 CertUpload 资源
 kubectl apply -f config/samples/certupload-sample.yaml
 ```
 
-#### 5. 验证结果
+### 6. 验证结果
 
 ```bash
-# 查看 CertUpload 状态
+# 查看资源状态
 kubectl get certupload -A
 
-# 查看详细信息
-kubectl describe certupload certupload-sample
-
-# 查看事件
-kubectl get events -n default --sort-by='.lastTimestamp'
+# 查看详情
+kubectl describe certupload certupload-oss-sample
 
 # 查看控制器日志
-kubectl logs -n certupload-system deployment/certupload-controller-manager -c manager -f
+kubectl logs -n certupload deployment/certupload-controller-manager -c manager -f
 ```
 
-#### 6. 清理资源
+### 7. 清理
 
 ```bash
-# 删除测试资源
-kubectl delete -f config/samples/certupload-sample.yaml
-kubectl delete -f config/samples/secret-sample.yaml
-
-# 卸载控制器
-kustomize build config/default | kubectl delete -f -
-
-# 删除集群
 kind delete cluster --name certupload-test
 ```
 
-### 常用命令速查
-
-| 命令 | 说明 |
-|------|------|
-| `make kind-create` | 创建 Kind 集群 |
-| `make kind-load` | 构建并加载镜像 |
-| `make kind-deploy` | 部署控制器 |
-| `make kind-test` | 一键完整测试 |
-| `make kind-logs` | 查看控制器日志 |
-| `make kind-clean` | 清理 Kind 集群 |
-
-## 部署指南
-
-### 方式一：YAML 安装包（推荐）
-
-适合快速部署，用户只需 `kubectl apply` 即可完成安装。
-
-#### 1. 生成安装包
-
-```bash
-make build-installer IMG=<your-registry>/certupload:<tag>
-```
-
-这将在 `dist/install.yaml` 生成包含所有必需资源的单一 YAML 文件。
-
-#### 2. 分发安装
-
-用户可以通过以下方式安装：
-
-```bash
-# 从远程 URL 安装
-kubectl apply -f https://raw.githubusercontent.com/<org>/certupload/<tag>/dist/install.yaml
-
-# 或从本地文件安装
-kubectl apply -f dist/install.yaml
-```
-
-### 方式二：Helm Chart
-
-适合需要自定义配置的场景。
-
-#### 1. 生成 Helm Chart
-
-```bash
-kubebuilder edit --plugins=helm/v2-alpha
-```
-
-生成的 Chart 位于 `dist/chart/` 目录。
-
-#### 2. 使用 Helm 部署
-
-**开发环境：**
-
-```bash
-# 设置镜像地址
-export IMG=<your-registry>/certupload:<tag>
-
-# 部署
-make helm-deploy IMG=$IMG
-
-# 查看状态
-make helm-status
-
-# 卸载
-make helm-uninstall
-```
-
-**生产环境：**
-
-```bash
-# 安装
-helm install certupload ./dist/chart/ \
-  --namespace certupload-system \
-  --create-namespace \
-  --set controllerManager.manager.image.repository=<your-registry>/certupload \
-  --set controllerManager.manager.image.tag=<tag>
-
-# 自定义配置
-helm install certupload ./dist/chart/ \
-  --namespace certupload-system \
-  --set controllerManager.replicas=3 \
-  --set controllerManager.resources.limits.memory=512Mi
-```
-
-> **注意：** 更新项目后需要重新生成 Helm Chart。如创建了 webhook，需使用 `--force` 参数，并手动恢复自定义配置。
-
-#### 3. Helm 常用操作
-
-```bash
-make helm-status    # 查看发布状态
-make helm-history   # 查看历史版本
-make helm-rollback  # 回滚到上一版本
-make helm-uninstall # 卸载发布
-```
 
 ## 开发指南
 
@@ -300,66 +195,157 @@ make helm-uninstall # 卸载发布
 
 ```
 certupload/
-├── api/                    # CRD API 定义
-│   └── v1/                 # API 版本
-├── cmd/                    # 程序入口
-│   └── main.go
-├── config/                 # Kubernetes 配置
-│   ├── crd/               # CRD 定义
-│   ├── rbac/              # RBAC 规则
-│   ├── samples/           # 示例资源
-│   └── default/           # 默认配置
-├── internal/              # 内部实现
-│   ├── controller/        # 控制器逻辑
-│   └── webhook/           # Webhook 实现（可选）
-├── dist/                  # 发布产物
-│   └── install.yaml       # 安装包
-├── test/                  # 测试代码
-├── Dockerfile             # 容器镜像定义
-├── Makefile               # 构建脚本
-└── PROJECT                # Kubebuilder 项目元数据
+├── api/v1/                # CRD 类型定义
+├── cmd/main.go              # 控制器入口
+├── config/
+│   ├── crd/bases/           # 生成的 CRD YAML
+│   ├── rbac/                # 生成的 RBAC
+│   ├── samples/             # 示例 CR
+│   └── default/             # Kustomize 配置
+├── internal/
+│   ├── controller/          # 调和逻辑 + 测试
+│   └── aliyun/              # 阿里云 SDK 封装
+├── dist/install.yaml        # 发布安装包
+├── test/e2e/                # 端到端测试
+├── Dockerfile
+├── Makefile
+└── PROJECT
 ```
 
 ### 开发工作流
 
 ```bash
-# 1. 修改 API 定义（api/v1/*_types.go）
-# 2. 生成 CRD 和 DeepCopy 方法
+# 1. 修改 CRD 类型（api/v1/certupload_types.go）
+# 2. 重新生成代码
 make manifests generate
 
-# 3. 修改控制器逻辑（internal/controller/*.go）
-# 4. 运行测试
+# 3. 修改控制器逻辑（internal/controller/）
+# 4. 本地运行（使用当前 kubeconfig 上下文）
+make run
+
+# 5. 运行测试
 make test
 
-# 5. 代码风格检查
+# 6. 代码检查（自动修复）
 make lint-fix
+```
 
-# 6. 本地运行
+### 本地调试
+
+不部署到集群，直接在本机启动控制器，方便断点调试和快速迭代。
+
+**前置条件：**
+- 已有可用的 K8s 集群（Kind 或远程均可）
+- `kubectl` 当前上下文指向目标集群
+- CRD 已安装到集群
+
+**步骤：**
+
+```bash
+# 1. 安装 CRD（不部署控制器）
+make install
+
+# 2. 本地启动控制器（前台运行，Ctrl+C 停止）
 make run
 ```
 
-### 运行测试
+控制台会打印控制器日志，直接看到调和过程和错误信息。
+
+**IDE 断点调试（GoLand / VSCode）：**
 
 ```bash
-# 单元测试
-make test
+# GoLand：直接运行 cmd/main.go，或创建 Go Build 配置
+#   Run kind: Package
+#   Package path: wyundong.com/certupload/cmd
+#   Working directory: $PROJECT_DIR$
 
-# 端到端测试（需要 Kind 集群）
-make test-e2e
+# VSCode：在 .vscode/launch.json 中添加
+{
+  "name": "Launch Controller",
+  "type": "go",
+  "request": "launch",
+  "mode": "auto",
+  "program": "${workspaceFolder}/cmd/main.go",
+  "env": {},
+  "args": []
+}
 ```
 
-### 代码质量
+**注意：** 本地运行时控制器使用当前 `~/.kube/config` 的上下文，确保已指向正确的集群。
+
+### 常用命令
+
+| 命令 | 说明 |
+|------|------|
+| `make manifests` | 生成 CRD YAML + RBAC |
+| `make generate` | 生成 DeepCopy 方法 |
+| `make run` | 本地运行控制器 |
+| `make test` | 单元测试（含 envtest） |
+| `make test-e2e` | 端到端测试（需 Kind） |
+| `make lint` | 代码检查 |
+| `make lint-fix` | 代码检查 + 自动修复 |
+| `make fmt` | 格式化代码 |
+| `make vet` | 静态分析 |
+| `make build` | 编译二进制 |
+
+## 发布部署
+
+面向生产环境的部署方式。
+
+### 前置：构建并推送镜像
 
 ```bash
-# 代码检查
-make lint
+export IMG=<your-registry>/certupload:<tag>
 
-# 自动修复
-make lint-fix
+# 本机构建
+make docker-build docker-push IMG=$IMG
 
-# 格式化代码
-make fmt
+# 交叉编译（如 ARM64 机器为 AMD64 服务器构建）
+make docker-buildx IMG=$IMG PLATFORMS=linux/amd64
 ```
+
+> **注意：** 确保目标集群能拉取镜像。如使用私有仓库，需配置 imagePullSecrets。
+
+### 方式一：YAML 安装包（推荐）
+
+生成单一 `dist/install.yaml`，用户只需一条 `kubectl apply` 即可完成安装。
+
+```bash
+# 生成安装包
+make build-installer IMG=$IMG
+
+# 安装
+kubectl apply -f dist/install.yaml
+
+# 卸载
+kubectl delete -f dist/install.yaml
+```
+
+发布到 GitHub 后，用户可直接从 URL 安装：
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/<org>/certupload/<tag>/dist/install.yaml
+```
+
+### 方式二：Helm Chart
+
+适合需要自定义配置的场景。
+
+```bash
+# 生成 Chart（首次）
+kubebuilder edit --plugins=helm/v2-alpha
+
+# 安装
+helm install certupload ./dist/chart/ \
+  --namespace certupload --create-namespace \
+  --set controllerManager.manager.image.repository=<your-registry>/certupload \
+  --set controllerManager.manager.image.tag=<tag>
+
+# 卸载
+helm uninstall certupload -n certupload
+```
+
+> **注意：** 更新 CRD 或新增 webhook 后需重新生成 Chart（`--force`），并手动恢复自定义 values。
 
 ## 故障排查
 
@@ -379,23 +365,29 @@ make install
 
 ```bash
 # 查看 Pod 状态
-kubectl get pods -n certupload-system
+kubectl get pods -n certupload
 
 # 查看 Pod 详情
-kubectl describe pod -n certupload-system -l control-plane=controller-manager
+kubectl describe pod -n certupload -l control-plane=controller-manager
 
 # 查看日志
-kubectl logs -n certupload-system deployment/certupload-controller-manager -c manager
+kubectl logs -n certupload deployment/certupload-controller-manager -c manager
 
 # 查看事件
-kubectl get events -n certupload-system --sort-by='.lastTimestamp'
+kubectl get events -n certupload --sort-by='.lastTimestamp'
 ```
 
 #### 3. 证书同步失败
 
 ```bash
-# 查看 CertUpload 状态
+# 查看 CertUpload 状态（含 OSS/CDN 独立状态）
 kubectl describe certupload <name>
+
+# 查看 OSS 同步状态
+kubectl get certupload <name> -o jsonpath='{.status.ossStatus}'
+
+# 查看 CDN 同步状态
+kubectl get certupload <name> -o jsonpath='{.status.cdnStatus}'
 
 # 检查 Secret 是否存在
 kubectl get secret <secret-name> -n <namespace>
@@ -404,14 +396,14 @@ kubectl get secret <secret-name> -n <namespace>
 kubectl get secret <credential-secret> -n <namespace> -o yaml
 
 # 查看控制器日志中的错误
-kubectl logs -n certupload-system deployment/certupload-controller-manager -c manager | grep -i error
+kubectl logs -n certupload deployment/certupload-controller-manager -c manager | grep -i error
 ```
 
 #### 4. RBAC 权限问题
 
 ```bash
 # 检查 ServiceAccount
-kubectl get serviceaccount -n certupload-system
+kubectl get serviceaccount -n certupload
 
 # 检查 ClusterRole 和 ClusterRoleBinding
 kubectl get clusterrole,clusterrolebinding | grep certupload
@@ -420,20 +412,34 @@ kubectl get clusterrole,clusterrolebinding | grep certupload
 kubectl get clusterrole certupload-manager-role -o yaml
 ```
 
+#### 5. CDN 域名证书配置失败
+
+```bash
+# 查看 CDN 错误信息
+kubectl get certupload <name> -o jsonpath='{.status.cdnErrorMessage}'
+
+# 确认 CDN 域名已在阿里云 CDN 控制台添加
+# 检查证书 ID 是否有效
+kubectl get certupload <name> -o jsonpath='{.status.casCertificateId}'
+
+# 验证区域配置（CDN 为全球服务，但 CAS 需要正确区域）
+kubectl get certupload <name> -o jsonpath='{.spec.region}'
+```
+
 ### 调试技巧
 
 ```bash
 # 增加日志级别
-kubectl set env deployment/certupload-controller-manager -n certupload-system LOG_LEVEL=debug
+kubectl set env deployment/certupload-controller-manager -n certupload LOG_LEVEL=debug
 
 # 查看资源 YAML
 kubectl get certupload <name> -o yaml
 
 # 查看控制器配置
-kubectl get configmap -n certupload-system
+kubectl get configmap -n certupload
 
 # 进入容器调试
-kubectl exec -it -n certupload-system deployment/certupload-controller-manager -c manager -- /bin/sh
+kubectl exec -it -n certupload deployment/certupload-controller-manager -c manager -- /bin/sh
 ```
 
 ## 贡献指南

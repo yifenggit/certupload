@@ -1,0 +1,9 @@
+apiVersion: aliyun.weyundong.com/v1
+kind: CertUpload
+metadata:
+  labels:
+    app.kubernetes.io/name: certupload
+    app.kubernetes.io/managed-by: kustomize
+  name: certupload-sample
+spec:
+  # TODO(user): Add fields here

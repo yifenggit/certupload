@@ -6,10 +6,11 @@
 # - HashiCorp Vault
 # - Kubernetes Secrets with encryption at rest
 ---
-apiVersion: aliyun.weyundong.com/v1alpha1
+# Example 1: OSS only
+apiVersion: aliyun.weyundong.com/v1
 kind: CertUpload
 metadata:
-  name: certupload-sample
+  name: certupload-oss-sample
   namespace: default
 spec:
   # Reference to Secret containing Aliyun Access Key ID
@@ -23,18 +24,104 @@ spec:
     name: aliyun-credentials
     namespace: default
     key: accessKeySecret
-  
+
   # Aliyun region
   region: "cn-hangzhou"
-  
-  # OSS bucket name
-  bucket: "your-oss-bucket"
-  
-  # Domain name for the certificate
-  domain: "example.com"
-  
+
+  # OSS configuration (optional: only updates OSS when configured)
+  oss:
+    bucket: "your-oss-bucket"
+    domain: "oss.example.com"
+
   # Reference to cert-manager Certificate
   certManagerCertRef:
     name: example-com-tls
     namespace: default
-    # If namespace is omitted, defaults to the same namespace as CertUpload
+---
+# Example 2: CDN only
+apiVersion: aliyun.weyundong.com/v1
+kind: CertUpload
+metadata:
+  name: certupload-cdn-sample
+  namespace: default
+spec:
+  accessKeyIdRef:
+    name: aliyun-credentials
+    namespace: default
+    key: accessKeyId
+
+  accessKeySecretRef:
+    name: aliyun-credentials
+    namespace: default
+    key: accessKeySecret
+
+  region: "cn-hangzhou"
+
+  # CDN configuration (optional: only updates CDN when configured)
+  cdn:
+    domain: "cdn.example.com"
+
+  certManagerCertRef:
+    name: example-com-tls
+    namespace: default
+---
+# Example 3: OSS + CDN (both)
+apiVersion: aliyun.weyundong.com/v1
+kind: CertUpload
+metadata:
+  name: certupload-both-sample
+  namespace: default
+spec:
+  accessKeyIdRef:
+    name: aliyun-credentials
+    namespace: default
+    key: accessKeyId
+
+  accessKeySecretRef:
+    name: aliyun-credentials
+    namespace: default
+    key: accessKeySecret
+
+  region: "cn-hangzhou"
+
+  # OSS domain certificate
+  oss:
+    bucket: "your-oss-bucket"
+    domain: "oss.example.com"
+
+  # CDN domain SSL certificate
+  cdn:
+    domain: "cdn.example.com"
+
+  certManagerCertRef:
+    name: example-com-tls
+    namespace: default
+---
+# Example 4: CAS only (uploadOnly mode)
+# Uploads the certificate to Aliyun CAS without binding to OSS or CDN.
+# The certificate can be used manually later for any Aliyun service.
+apiVersion: aliyun.weyundong.com/v1
+kind: CertUpload
+metadata:
+  name: certupload-cas-sample
+  namespace: default
+spec:
+  accessKeyIdRef:
+    name: aliyun-credentials
+    namespace: default
+    key: accessKeyId
+
+  accessKeySecretRef:
+    name: aliyun-credentials
+    namespace: default
+    key: accessKeySecret
+
+  region: "cn-hangzhou"
+
+  # Explicitly set to only upload to CAS, no OSS/CDN binding
+  uploadOnly: true
+
+  # CAS certificate name is auto-derived from cert-manager Certificate DNS names
+  certManagerCertRef:
+    name: example-com-tls
+    namespace: default

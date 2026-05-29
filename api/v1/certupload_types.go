@@ -14,11 +14,34 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1
+package v1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// OSSConfig defines the OSS domain certificate configuration.
+// If set, the controller will update the OSS domain certificate after uploading to CAS.
+type OSSConfig struct {
+	// Bucket is the name of the OSS bucket where the domain certificate should be updated.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Bucket string `json:"bucket"`
+
+	// Domain is the domain name for the OSS bucket certificate binding.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Domain string `json:"domain"`
+}
+
+// CDNConfig defines the CDN domain SSL certificate configuration.
+// If set, the controller will update the CDN domain SSL certificate after uploading to CAS.
+type CDNConfig struct {
+	// Domain is the CDN accelerated domain name for which the SSL certificate should be configured.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Domain string `json:"domain"`
+}
 
 // CertUploadSpec defines the desired state of CertUpload
 type CertUploadSpec struct {
@@ -32,24 +55,30 @@ type CertUploadSpec struct {
 	// +kubebuilder:validation:Required
 	AccessKeySecretRef SecretKeySelector `json:"accessKeySecretRef"`
 
-	// Region is the Aliyun region where the SSL certificate service and OSS bucket are located.
+	// Region is the Aliyun region where the SSL certificate service (CAS) is located.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	Region string `json:"region"`
 
-	// Bucket is the name of the OSS bucket where the domain certificate should be updated.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=1
-	Bucket string `json:"bucket"`
-
-	// Domain is the domain name for which the certificate should be uploaded.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=1
-	Domain string `json:"domain"`
-
 	// CertManagerCertRef is a reference to the cert-manager Certificate resource.
 	// +kubebuilder:validation:Required
 	CertManagerCertRef CertManagerCertRef `json:"certManagerCertRef"`
+
+	// OSS is the optional OSS domain certificate configuration.
+	// If set, the controller will update the OSS bucket domain certificate.
+	// +optional
+	OSS *OSSConfig `json:"oss,omitempty"`
+
+	// CDN is the optional CDN domain SSL certificate configuration.
+	// If set, the controller will update the CDN domain SSL certificate.
+	// +optional
+	CDN *CDNConfig `json:"cdn,omitempty"`
+
+	// UploadOnly when set to true, uploads the certificate to Aliyun CAS only,
+	// without binding to OSS or CDN. Use this when you want to manually manage
+	// certificate bindings later.
+	// +optional
+	UploadOnly bool `json:"uploadOnly,omitempty"`
 }
 
 // SecretKeySelector selects a key of a Secret.
@@ -102,15 +131,45 @@ type CertUploadStatus struct {
 	// ErrorMessage contains a human-readable error message if the last sync failed.
 	// +optional
 	ErrorMessage string `json:"errorMessage,omitempty"`
+
+	// CASCertificateID is the ID of the certificate stored in Aliyun CAS.
+	// +optional
+	CASCertificateID string `json:"casCertificateId,omitempty"`
+
+	// OSSLastSyncTime is the timestamp when the OSS domain certificate was last updated.
+	// +optional
+	OSSLastSyncTime *metav1.Time `json:"ossLastSyncTime,omitempty"`
+
+	// OSSStatus indicates the last OSS sync result: Succeeded, Failed, or Skipped.
+	// +optional
+	OSSStatus string `json:"ossStatus,omitempty"`
+
+	// OSSErrorMessage contains the error message if the last OSS sync failed.
+	// +optional
+	OSSErrorMessage string `json:"ossErrorMessage,omitempty"`
+
+	// CDNLastSyncTime is the timestamp when the CDN domain SSL certificate was last updated.
+	// +optional
+	CDNLastSyncTime *metav1.Time `json:"cdnLastSyncTime,omitempty"`
+
+	// CDNStatus indicates the last CDN sync result: Succeeded, Failed, or Skipped.
+	// +optional
+	CDNStatus string `json:"cdnStatus,omitempty"`
+
+	// CDNErrorMessage contains the error message if the last CDN sync failed.
+	// +optional
+	CDNErrorMessage string `json:"cdnErrorMessage,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=cu;cupload
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status"
+// +kubebuilder:printcolumn:name="OSS Status",type="string",JSONPath=".status.ossStatus"
+// +kubebuilder:printcolumn:name="CDN Status",type="string",JSONPath=".status.cdnStatus"
 // +kubebuilder:printcolumn:name="Last Sync",type="date",JSONPath=".status.lastSyncTime"
-// +kubebuilder:printcolumn:name="Domain",type="string",JSONPath=".spec.domain"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:storageversion
 
 // CertUpload is the Schema for the certuploads API
 type CertUpload struct {

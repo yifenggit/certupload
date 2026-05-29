@@ -36,7 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
-	aliyunv1alpha1 "wyundong.com/certupload/api/v1alpha1"
+	aliyunv1 "wyundong.com/certupload/api/v1"
 	"wyundong.com/certupload/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
@@ -49,8 +49,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(certmanagerv1.AddToScheme(scheme))
-	utilruntime.Must(aliyunv1alpha1.AddToScheme(scheme))
-
+	utilruntime.Must(aliyunv1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 

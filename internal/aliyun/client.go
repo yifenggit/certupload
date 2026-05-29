@@ -29,6 +29,7 @@ import (
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/auth/credentials"
 	"github.com/aliyun/alibaba-cloud-sdk-go/sdk/requests"
 	"github.com/aliyun/alibaba-cloud-sdk-go/services/cas"
+	"github.com/aliyun/alibaba-cloud-sdk-go/services/cdn"
 	"github.com/aliyun/aliyun-oss-go-sdk/oss"
 	"github.com/go-logr/logr"
 )
@@ -236,4 +237,42 @@ func (c *Client) CertificateExists(ctx context.Context, certificateId string) (b
 	}
 
 	return true, nil
+}
+
+// SetCDNDomainCertificate configures the SSL certificate for a CDN domain
+// using a certificate ID from Aliyun CAS service.
+func (c *Client) SetCDNDomainCertificate(ctx context.Context, domain, certificateId string) error {
+	c.logger.Info("Setting CDN domain SSL certificate", "domain", domain, "certificateId", certificateId)
+
+	// Create CDN client
+	config := sdk.NewConfig()
+	config.Timeout = 30 * time.Second
+	cred := credentials.NewAccessKeyCredential(c.accessKeyID, c.accessKeySecret)
+
+	client, err := cdn.NewClientWithOptions(c.region, config, cred)
+	if err != nil {
+		return fmt.Errorf("failed to create CDN client: %w", err)
+	}
+
+	// Prepare request
+	request := cdn.CreateSetCdnDomainSSLCertificateRequest()
+	request.Scheme = "https"
+	request.DomainName = domain
+	request.CertType = "cas" // Use certificate from Aliyun CAS
+	request.CertId = requests.Integer(certificateId)
+	request.SSLProtocol = "on"
+	request.CertName = fmt.Sprintf("cert-%s", strings.ReplaceAll(domain, ".", "-"))
+
+	// Send request
+	response, err := client.SetCdnDomainSSLCertificate(request)
+	if err != nil {
+		return fmt.Errorf("failed to set CDN domain SSL certificate: %w", err)
+	}
+
+	c.logger.Info("CDN domain SSL certificate configured successfully",
+		"domain", domain,
+		"certificateId", certificateId,
+		"requestId", response.RequestId)
+
+	return nil
 }
