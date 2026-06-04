@@ -18,9 +18,14 @@ package aliyun
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha1"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"io"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -86,52 +91,111 @@ func (c *Client) UploadCertificate(ctx context.Context, certPEM, keyPEM, domain 
 	return certIdStr, nil
 }
 
-// UpdateOSSDomainCertificate updates OSS domain certificate configuration
-// Note: This is a simplified implementation. In production, you would need to:
-// 1. Check if the domain is already bound to the bucket
-// 2. Bind the domain if not already bound (requires DNS CNAME configuration)
-// 3. Set the certificate for the domain using OSS API or Console
-// The actual implementation may vary based on your Aliyun account setup and requirements
+// UpdateOSSDomainCertificate updates OSS domain certificate configuration.
+// It binds the domain to the bucket (if not already bound) and sets the SSL certificate
+// for it using the certificate stored in Aliyun CAS.
 func (c *Client) UpdateOSSDomainCertificate(ctx context.Context, bucketName, domain, certificateId string) error {
 	c.logger.Info("Updating OSS domain certificate", "bucket", bucketName, "domain", domain, "certificateId", certificateId)
 
 	// Create OSS client
-	client, err := oss.New(fmt.Sprintf("https://oss-%s.aliyuncs.com", c.region), c.accessKeyID, c.accessKeySecret)
+	ossClient, err := oss.New(fmt.Sprintf("https://oss-%s.aliyuncs.com", c.region), c.accessKeyID, c.accessKeySecret)
 	if err != nil {
 		return fmt.Errorf("failed to create OSS client: %w", err)
 	}
 
-	// Try to bind domain to bucket if not already bound
-	// This will fail if the domain is already bound, which is acceptable
-	c.logger.Info("Attempting to bind domain to bucket", "domain", domain)
-	err = client.PutBucketCname(bucketName, domain)
+	// 1. Bind domain to bucket if not already bound
+	c.logger.Info("Binding domain to bucket", "domain", domain)
+	err = ossClient.PutBucketCname(bucketName, domain)
 	if err != nil {
-		// Log the error but don't fail - domain might already be bound
-		c.logger.Info("Domain binding result (may already be bound)", "domain", domain, "error", err.Error())
+		if strings.Contains(err.Error(), "DomainAlreadyExists") || strings.Contains(err.Error(), "already exists") {
+			c.logger.Info("Domain already bound to bucket", "domain", domain)
+		} else {
+			c.logger.Info("Domain binding result", "domain", domain, "error", err.Error())
+		}
 	} else {
 		c.logger.Info("Domain bound to bucket successfully", "domain", domain)
 	}
 
-	// Note: Setting the certificate for a CNAME requires using the Aliyun Console or
-	// a specific API that may not be directly available in the OSS Go SDK.
-	// The certificate uploaded to CAS can be used, but the association needs to be done
-	// through the Aliyun Console > OSS > Bucket > Domain Management > Certificate Hosting
-	//
-	// Alternative approaches:
-	// 1. Use Aliyun CLI: aliyun oss put-cname-cert
-	// 2. Use Aliyun SDK for OpenAPI
-	// 3. Manual configuration through console
-	//
-	// For now, we log the information and assume the certificate will be manually associated
-	// or a separate automation will handle the certificate binding
+	// 2. Set SSL certificate for the CNAME domain via OSS REST API
+	if err := c.setOSSCnameCertificate(ctx, bucketName, domain, certificateId); err != nil {
+		return fmt.Errorf("failed to set OSS CNAME certificate: %w", err)
+	}
 
-	c.logger.Info("OSS domain certificate update completed",
-		"bucket", bucketName,
-		"domain", domain,
-		"certificateId", certificateId,
-		"note", "Certificate uploaded to CAS. Please associate it with the domain in OSS Console > Domain Management")
+	c.logger.Info("OSS domain certificate configured successfully",
+		"bucket", bucketName, "domain", domain, "certificateId", certificateId)
 
 	return nil
+}
+
+// setOSSCnameCertificate sets the SSL certificate for an OSS bucket CNAME domain
+// using the OSS REST API (POST /?cname&comp=add).
+func (c *Client) setOSSCnameCertificate(ctx context.Context, bucketName, domain, certificateId string) error {
+	endpoint := fmt.Sprintf("%s.oss-%s.aliyuncs.com", bucketName, c.region)
+	url := fmt.Sprintf("https://%s/?cname&comp=add", endpoint)
+
+	body := fmt.Sprintf(`<BucketCnameConfiguration>
+  <Cname>
+    <Domain>%s</Domain>
+    <CertificateConfiguration>
+      <CertId>%s</CertId>
+      <Force>true</Force>
+    </CertificateConfiguration>
+  </Cname>
+</BucketCnameConfiguration>`, domain, certificateId)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	date := time.Now().UTC().Format(http.TimeFormat)
+	req.Header.Set("Content-Type", "application/xml")
+	req.Header.Set("Date", date)
+	req.Header.Set("Content-Length", fmt.Sprintf("%d", len(body)))
+
+	// OSS Signature V1
+	signature := c.ossSignature("POST", body, date, req.Header, "/"+bucketName+"/?cname&comp=add")
+	req.Header.Set("Authorization", "OSS "+c.accessKeyID+":"+signature)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("OSS CNAME cert request failed: status=%d, body=%s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
+// ossSignature computes OSS Signature V1.
+func (c *Client) ossSignature(method, bodyStr, date string, headers http.Header, canonicalizedResource string) string {
+	contentMD5 := ""
+	contentType := headers.Get("Content-Type")
+
+	// Canonicalized OSS Headers (sorted, lowercase)
+	var ossHeaders []string
+	for k, vs := range headers {
+		kl := strings.ToLower(k)
+		if strings.HasPrefix(kl, "x-oss-") {
+			ossHeaders = append(ossHeaders, kl+":"+strings.TrimSpace(vs[0])+"\n")
+		}
+	}
+	canonicalizedHeaders := strings.Join(ossHeaders, "")
+
+	stringToSign := method + "\n" +
+		contentMD5 + "\n" +
+		contentType + "\n" +
+		date + "\n" +
+		canonicalizedHeaders +
+		canonicalizedResource
+
+	mac := hmac.New(sha1.New, []byte(c.accessKeySecret))
+	mac.Write([]byte(stringToSign))
+	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
 }
 
 // FindCertificateByFingerprint searches for an existing certificate in CAS by SHA256 fingerprint
