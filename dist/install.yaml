@@ -587,7 +587,7 @@ spec:
         - --health-probe-bind-address=:8081
         command:
         - /manager
-        image: registry.cn-chengdu.aliyuncs.com/buf/certupload:1.1.0
+        image: registry.cn-chengdu.aliyuncs.com/buf/certupload:1.1.1
         livenessProbe:
           httpGet:
             path: /healthz
